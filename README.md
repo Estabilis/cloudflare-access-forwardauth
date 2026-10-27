@@ -50,7 +50,7 @@ docker run --rm -p 8080:8080 \
   ghcr.io/estabilis/cloudflare-access-forwardauth:latest
 ```
 
-Image: `ghcr.io/estabilis/cloudflare-access-forwardauth` (linux/amd64 + arm64), tags `latest`, `vX.Y.Z`, `X.Y`,
+Image: `ghcr.io/estabilis/cloudflare-access-forwardauth` (linux/amd64 + arm64), tags `latest`, `X.Y.Z` (from git tag `vX.Y.Z`), `X.Y`, `main`,
 `sha-<commit>`. Runs as uid 10001, works with a read-only root filesystem (mount a writable `/tmp`).
 
 ## Proxy examples
