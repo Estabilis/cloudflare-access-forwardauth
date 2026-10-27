@@ -1,0 +1,4 @@
+# Dependency sources. The lock (requirements.txt) is generated with hashes:
+#   docker run --rm -v "$PWD":/w -w /w python:3.13-slim sh -c 'pip install -q pip-tools && pip-compile --generate-hashes --strip-extras requirements.in'
+pyjwt[crypto]
+uvicorn
