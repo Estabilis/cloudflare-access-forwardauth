@@ -37,9 +37,27 @@ issuer `https://<team>.cloudflareaccess.com`, audience = your application's AUD 
 | `CF_ACCESS_CERTS_URL` | no | `https://$TEAM/cdn-cgi/access/certs` | JWKS URL (override for tests) |
 | `USER_HEADER` | no | `X-Remote-User` | response header carrying the identity |
 | `EMAIL_HEADER` | no | `X-Remote-User-Email` | response header carrying the e-mail |
-| `REQUIRE_EMAIL` | no | `true` | reject tokens without `email` (Access **service tokens** have none). Set `false` to accept them: identity becomes `common_name`/`sub` |
+| `SERVICE_TOKENS` | no | `reject` | what to do with Access **service tokens** (JWT without `email`): `reject` (401), `pass` (200 with empty identity headers: the app does its own auth) or `identity` (200 with `X-Remote-User` = `common_name`). See below |
+| `REQUIRE_EMAIL` | no | `true` | deprecated alias: `false` = `SERVICE_TOKENS=identity` |
 | `CLOCK_SKEW_SECONDS` | no | `30` | leeway for `exp`/`iat`/`nbf` |
 | `LOG_LEVEL` | no | `INFO` | `DEBUG` logs each accepted identity |
+
+## Service tokens (machine clients)
+
+Scripts and integrations authenticate to Access with a [service token](https://developers.cloudflare.com/cloudflare-one/identity/service-tokens/)
+(`CF-Access-Client-Id` / `CF-Access-Client-Secret` headers, plus a *Service Auth* policy on the application).
+Cloudflare then issues a JWT with `common_name` = the token name and **no `email`**. By default such requests
+are rejected, so only humans get in. Two ways to allow them:
+
+- `SERVICE_TOKENS=pass`: the request is let through with **empty** `X-Remote-User`/`X-Remote-User-Email`.
+  The upstream app must authenticate it itself (API token, basic auth...), exactly as if nobody were logged in.
+  The empty headers are sent on purpose: a proxy that only *replaces* headers still wipes whatever the client
+  forged. This is the right mode for apps with their own API tokens (NetBox, Grafana service accounts...):
+  the service token proves the client is allowed to reach the origin, the API token says who it is.
+- `SERVICE_TOKENS=identity`: the token is logged in as a user named `common_name` (e.g. `abcdef0123.access`).
+  Use it only if the app should treat the token itself as a user.
+
+Both modes keep every other check (signature, issuer, audience, expiry).
 
 ## Run
 
@@ -83,8 +101,8 @@ pytest -q
 ```
 
 Tests sign JWTs with a local RSA key served from an in-process JWKS endpoint and cover: valid token via header and
-via cookie, forged client header, expired, wrong audience, wrong issuer, wrong key, unknown `kid`, missing
-e-mail, tampered signature, garbage. Dependencies are pinned with hashes; regenerate with
+via cookie, forged client header, expired, wrong audience, wrong issuer, wrong key, unknown `kid`,
+tampered signature, garbage, and service tokens in the three `SERVICE_TOKENS` modes. Dependencies are pinned with hashes; regenerate with
 
 ```sh
 docker run --rm -v "$PWD":/w -w /w python:3.13-slim sh -c 'pip install -q pip-tools && pip-compile --generate-hashes --strip-extras requirements.in && pip-compile --generate-hashes --strip-extras -o requirements-dev.txt requirements-dev.in'

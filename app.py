@@ -20,6 +20,15 @@ application), expiry and the presence of an `email` claim. On success the respon
 upstream request, which lets apps that support header-based auth (NetBox REMOTE_AUTH, Grafana
 auth.proxy, Django RemoteUserMiddleware, ...) log the user in automatically.
 
+Access *service tokens* (machine clients sending CF-Access-Client-Id/Secret) get a JWT without
+`email`, only `common_name`. SERVICE_TOKENS decides what to do with them:
+  - reject   (default) 401: only humans get through.
+  - pass     200 with EMPTY identity headers: the request reaches the app, which must authenticate
+             it on its own (API token, basic auth...). The empty headers make the proxy overwrite
+             anything the client sent, so a service token can never impersonate a user.
+  - identity 200 with X-Remote-User = common_name (e-mail empty): the app logs the token in as a
+             user named after it.
+
 Deliberately framework-free: a raw ASGI app on uvicorn, one real dependency (PyJWT + cryptography).
 Less surface in an authentication component is a feature.
 """
@@ -41,7 +50,12 @@ ISSUER = f"https://{TEAM_DOMAIN}"
 JWKS_URL = os.environ.get("CF_ACCESS_CERTS_URL", f"{ISSUER}/cdn-cgi/access/certs")
 USER_HEADER = os.environ.get("USER_HEADER", "X-Remote-User").lower().encode("latin-1")   # ASGI: header names are lowercase
 EMAIL_HEADER = os.environ.get("EMAIL_HEADER", "X-Remote-User-Email").lower().encode("latin-1")
-REQUIRE_EMAIL = os.environ.get("REQUIRE_EMAIL", "true").lower() not in ("0", "false", "no")
+SERVICE_TOKENS = os.environ.get("SERVICE_TOKENS", "").strip().lower()
+if not SERVICE_TOKENS:
+    # REQUIRE_EMAIL=false (0.1.x) meant "accept service tokens, identity = common_name".
+    SERVICE_TOKENS = "reject" if os.environ.get("REQUIRE_EMAIL", "true").lower() not in ("0", "false", "no") else "identity"
+if SERVICE_TOKENS not in ("reject", "pass", "identity"):
+    raise SystemExit(f"SERVICE_TOKENS must be reject, pass or identity (got {SERVICE_TOKENS!r})")
 LEEWAY = int(os.environ.get("CLOCK_SKEW_SECONDS", "30"))
 
 # Cloudflare rotates signing keys. The JWK set is cached for an hour; an unknown `kid` triggers a
@@ -85,13 +99,16 @@ def verify(token: str) -> tuple[str, str]:
     email = (claims.get("email") or "").strip().lower()
     if email and "@" in email:
         return email, email
-    if REQUIRE_EMAIL:
-        # Access service tokens carry no e-mail: with REQUIRE_EMAIL they cannot log in to the app.
-        raise jwt.InvalidTokenError("JWT has no 'email' claim")
-    user = (claims.get("common_name") or claims.get("sub") or "").strip()
-    if not user:
+    # No e-mail: an Access service token (or a malformed JWT).
+    if SERVICE_TOKENS == "reject":
+        raise jwt.InvalidTokenError("JWT has no 'email' claim (service tokens are rejected: SERVICE_TOKENS=reject)")
+    name = (claims.get("common_name") or claims.get("sub") or "").strip()
+    if not name:
         raise jwt.InvalidTokenError("JWT has neither 'email' nor 'common_name'/'sub'")
-    return user, ""
+    if SERVICE_TOKENS == "pass":
+        log.info("service token %s: passing without identity", name)
+        return "", ""
+    return name, ""
 
 
 async def _send(send, status: int, body: bytes, extra_headers: list[tuple[bytes, bytes]] = ()):

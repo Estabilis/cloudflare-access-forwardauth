@@ -118,10 +118,51 @@ def test_client_header_does_not_leak(guard):
         _token(iss="https://outra.cloudflareaccess.com"),
         _token(key=_other),                            # signed by another key (same kid)
         _token(kid="kid-inexistente"),
-        _token(email=None),                            # service token: no e-mail
+        _token(email=None, sub="", common_name="abcdef.access"),   # service token: rejected by default
         _token()[:-5] + "AAAAA",                       # tampered signature
         "nao.e.jwt",
     ],
 )
 def test_invalid_tokens_401(guard, tok):
     assert _call(guard, {"Cf-Access-Jwt-Assertion": tok})["status"] == 401
+
+
+# --- Access service tokens (CF-Access-Client-Id/Secret): JWT with common_name and no e-mail ---
+
+def _svc(**over):
+    return _token(email=None, sub="", common_name="abcdef.access", **over)
+
+
+def test_service_token_rejected_by_default(guard):
+    assert guard.SERVICE_TOKENS == "reject"
+    assert _call(guard, {"Cf-Access-Jwt-Assertion": _svc()})["status"] == 401
+
+
+def test_service_token_pass(guard, monkeypatch):
+    monkeypatch.setattr(guard, "SERVICE_TOKENS", "pass")
+    r = _call(guard, {"Cf-Access-Jwt-Assertion": _svc(), "X-Remote-User": "admin"})
+    assert r["status"] == 200
+    # identity headers are present but EMPTY, so the proxy overwrites whatever the client sent
+    assert r["headers"]["x-remote-user"] == ""
+    assert r["headers"]["x-remote-user-email"] == ""
+    # humans are unaffected
+    assert _call(guard, {"Cf-Access-Jwt-Assertion": _token()})["headers"]["x-remote-user"] == "daniel@example.com"
+
+
+def test_service_token_identity(guard, monkeypatch):
+    monkeypatch.setattr(guard, "SERVICE_TOKENS", "identity")
+    r = _call(guard, {"Cf-Access-Jwt-Assertion": _svc()})
+    assert r["status"] == 200
+    assert r["headers"]["x-remote-user"] == "abcdef.access"
+    assert r["headers"]["x-remote-user-email"] == ""
+
+
+def test_service_token_without_name_401(guard, monkeypatch):
+    monkeypatch.setattr(guard, "SERVICE_TOKENS", "pass")
+    assert _call(guard, {"Cf-Access-Jwt-Assertion": _token(email=None, sub="")})["status"] == 401
+
+
+def test_service_token_still_validated(guard, monkeypatch):
+    monkeypatch.setattr(guard, "SERVICE_TOKENS", "pass")
+    assert _call(guard, {"Cf-Access-Jwt-Assertion": _svc(aud=["b" * 64])})["status"] == 401
+    assert _call(guard, {"Cf-Access-Jwt-Assertion": _svc(key=_other)})["status"] == 401

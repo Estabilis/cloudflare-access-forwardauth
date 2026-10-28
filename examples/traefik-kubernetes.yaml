@@ -22,6 +22,7 @@ spec:
           env:
             - {name: CF_ACCESS_TEAM_DOMAIN, value: "<team>.cloudflareaccess.com"}
             - {name: CF_ACCESS_AUD, value: "<application audience tag>"}
+            # - {name: SERVICE_TOKENS, value: "pass"}   # let Access service tokens reach the app (it does its own API auth)
           ports: [{containerPort: 8080}]
           readinessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 10}
           livenessProbe: {httpGet: {path: /healthz, port: 8080}, periodSeconds: 30}
