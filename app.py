@@ -106,7 +106,7 @@ def verify(token: str) -> tuple[str, str]:
     if not name:
         raise jwt.InvalidTokenError("JWT has neither 'email' nor 'common_name'/'sub'")
     if SERVICE_TOKENS == "pass":
-        log.info("service token %s: passing without identity", name)
+        log.debug("service token %s: passing without identity", name)   # debug: the client id is half a credential
         return "", ""
     return name, ""
 
